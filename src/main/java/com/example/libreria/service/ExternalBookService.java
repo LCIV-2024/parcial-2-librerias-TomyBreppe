@@ -22,6 +22,7 @@ public class ExternalBookService {
     
     @Value("${external.api.books.url}")
     private String externalApiUrl;
+
     
     public ExternalBookService(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;

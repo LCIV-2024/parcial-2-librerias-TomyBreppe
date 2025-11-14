@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -34,20 +35,48 @@ public class ReservationService {
     @Transactional
     public ReservationResponseDTO createReservation(ReservationRequestDTO requestDTO) {
 
-        // TODO: Implementar la creación de una reserva
+        // TO DO: Implementar la creación de una reserva
         // Validar que el usuario existe
+        User user = userService.getUserEntity(requestDTO.getUserId());
+        if (user == null) {
+            throw new RuntimeException("Usuario no encontrado con ID: " + requestDTO.getUserId());
+        }
         
         // Validar que el libro existe y está disponible
-        
+        Book book = bookRepository.findByExternalId(requestDTO.getBookExternalId())
+                .orElseThrow(() -> new RuntimeException(
+                        "Libro no encontrado con ID externo: " + requestDTO.getBookExternalId()
+                ));
+        if (book.getAvailableQuantity() == null || book.getAvailableQuantity() <= 0) {
+            throw new RuntimeException("Libro no disponible para reserva");
+        }
         // Crear la reserva
-        
+        BigDecimal dailyRate = book.getPrice();
+        BigDecimal totalFee = calculateTotalFee(dailyRate, requestDTO.getRentalDays());
+
+        Reservation reservation = new Reservation();
+        reservation.setUser(user);
+        reservation.setBook(book);
+        reservation.setRentalDays(requestDTO.getRentalDays());
+        reservation.setStartDate(requestDTO.getStartDate());
+        reservation.setExpectedReturnDate(requestDTO.getStartDate().plusDays(requestDTO.getRentalDays()));
+        reservation.setDailyRate(dailyRate);
+        reservation.setTotalFee(totalFee);
+        reservation.setLateFee(BigDecimal.ZERO);
+        reservation.setStatus(Reservation.ReservationStatus.ACTIVE);
+
+        Reservation saved = reservationRepository.save(reservation);
         // Reducir la cantidad disponible
+        book.setAvailableQuantity(book.getAvailableQuantity() - 1);
+        bookRepository.save(book);
+
+        return convertToDTO(saved);
     }
     
     @Transactional
     public ReservationResponseDTO returnBook(Long reservationId, ReturnBookRequestDTO returnRequest) {
 
-        // TODO: Implementar la devolución de un libro
+        // TO DO: Implementar la devolución de un libro
         Reservation reservation = reservationRepository.findById(reservationId)
                 .orElseThrow(() -> new RuntimeException("Reserva no encontrada con ID: " + reservationId));
         
@@ -59,10 +88,24 @@ public class ReservationService {
         reservation.setActualReturnDate(returnDate);
         
         // Calcular tarifa por demora si hay retraso
-
+        LocalDate expectedReturnDate = reservation.getExpectedReturnDate();
+        if (returnDate.isAfter(expectedReturnDate)) {
+            long daysLate = ChronoUnit.DAYS.between(expectedReturnDate, returnDate);
+            BigDecimal lateFee = calculateLateFee(reservation.getBook().getPrice(), daysLate);
+            reservation.setLateFee(lateFee);
+            reservation.setStatus(Reservation.ReservationStatus.OVERDUE);
+        } else {
+            reservation.setLateFee(BigDecimal.ZERO);
+            reservation.setStatus(Reservation.ReservationStatus.RETURNED);
+        }
         
         // Aumentar la cantidad disponible
+        Book book = reservation.getBook();
+        book.setAvailableQuantity(book.getAvailableQuantity() + 1);
+        bookRepository.save(book);
 
+        Reservation saved = reservationRepository.save(reservation);
+        return convertToDTO(saved);
     }
     
     @Transactional(readOnly = true)
@@ -101,12 +144,25 @@ public class ReservationService {
     }
     
     private BigDecimal calculateTotalFee(BigDecimal dailyRate, Integer rentalDays) {
-        // TODO: Implementar el cálculo del total de la reserva
+        // TO DO: Implementar el cálculo del total de la reserva
+        if (dailyRate == null || rentalDays == null) {
+            return BigDecimal.ZERO;
+        }
+        return dailyRate
+                .multiply(BigDecimal.valueOf(rentalDays.longValue()))
+                .setScale(2, RoundingMode.HALF_UP);
     }
     
     private BigDecimal calculateLateFee(BigDecimal bookPrice, long daysLate) {
         // 15% del precio del libro por cada día de demora
-        // TODO: Implementar el cálculo de la multa por demora
+        // TO DO: Implementar el cálculo de la multa por demora
+        if (bookPrice == null || daysLate <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return bookPrice
+                .multiply(LATE_FEE_PERCENTAGE)
+                .multiply(BigDecimal.valueOf(daysLate))
+                .setScale(2, RoundingMode.HALF_UP);
     }
     
     private ReservationResponseDTO convertToDTO(Reservation reservation) {
