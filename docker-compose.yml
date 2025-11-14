@@ -11,7 +11,7 @@ services:
       - h2_data:/data
     environment:
       SPRING_DATASOURCE_URL: "jdbc:h2:file:/data/libreria_db"
-    restart: always
+    restart: unless-stopped
 
 volumes:
   h2_data:
